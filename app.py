@@ -1,9 +1,7 @@
-# app.py - Interfaz Streamlit Simplificada
+# app.py - Interfaz Streamlit con verificación de configuración
 import streamlit as st
 import os
-from document_processor import DocumentProcessor
-from vector_store import VectorStoreManager
-from rag_chatbot import RAGChatbot
+from config import Config
 import time
 
 # Configuración de la página
@@ -51,8 +49,53 @@ st.markdown("""
         border-radius: 0.5rem;
         border: 1px solid #ffeaa7;
     }
+    .error-box {
+        background-color: #f8d7da;
+        color: #721c24;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        border: 1px solid #f5c6cb;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+def check_configuration():
+    """Verifica que la configuración esté correcta"""
+    config = Config()
+    errors = config.validate_keys()
+    
+    if errors:
+        st.markdown('<h1 class="main-header">⚙️ Configuración Requerida</h1>', unsafe_allow_html=True)
+        
+        st.markdown(f'<div class="error-box"><strong>❌ Configuración Incompleta</strong><br>{"<br>".join(errors)}</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+        ### 🔧 Para configurar las API Keys en Streamlit Cloud:
+        
+        1. **Ve a tu aplicación en Streamlit Cloud**
+        2. **Haz clic en "Manage app"** (esquina inferior derecha)
+        3. **Ve a la pestaña "Settings"**
+        4. **Selecciona "Secrets"**
+        5. **Agrega las siguientes variables:**
+        
+        ```toml
+        OPENAI_API_KEY = "tu-api-key-real-de-openai"
+        PINECONE_API_KEY = "tu-api-key-real-de-pinecone"
+        DOCUMENTS_FOLDER = "documentos"
+        ```
+        
+        6. **Guarda los cambios**
+        7. **La aplicación se reiniciará automáticamente**
+        
+        ### 📝 Notas importantes:
+        - No incluyas las comillas en las API keys
+        - Las API keys deben ser reales, no placeholders
+        - Después de guardar, espera unos segundos para que se reinicie
+        """)
+        
+        return False
+    
+    return True
 
 # Inicializar estados de sesión
 if "chatbot" not in st.session_state:
@@ -66,34 +109,46 @@ if "documents_processed" not in st.session_state:
 
 def check_documents():
     """Verifica si hay documentos en la carpeta"""
-    processor = DocumentProcessor()
-    pdf_files = processor.get_pdf_files()
-    return len(pdf_files) > 0, len(pdf_files)
+    try:
+        from document_processor import DocumentProcessor
+        processor = DocumentProcessor()
+        pdf_files = processor.get_pdf_files()
+        return len(pdf_files) > 0, len(pdf_files)
+    except Exception as e:
+        st.error(f"Error verificando documentos: {e}")
+        return False, 0
 
 def process_documents():
     """Procesa y almacena documentos"""
-    with st.spinner("🔄 Procesando documentos PDF..."):
-        # Procesar documentos
-        processor = DocumentProcessor()
-        documents = processor.process_documents()
-        
-        if documents:
-            # Almacenar en vector store
-            vector_manager = VectorStoreManager()
-            success = vector_manager.store_documents(documents)
+    try:
+        with st.spinner("🔄 Procesando documentos PDF..."):
+            # Procesar documentos
+            from document_processor import DocumentProcessor
+            processor = DocumentProcessor()
+            documents = processor.process_documents()
             
-            if success:
-                st.session_state.documents_processed = True
-                return True, len(documents)
+            if documents:
+                # Almacenar en vector store
+                from vector_store import VectorStoreManager
+                vector_manager = VectorStoreManager()
+                success = vector_manager.store_documents(documents)
+                
+                if success:
+                    st.session_state.documents_processed = True
+                    return True, len(documents)
+                else:
+                    return False, 0
             else:
                 return False, 0
-        else:
-            return False, 0
+    except Exception as e:
+        st.error(f"Error procesando documentos: {e}")
+        return False, 0
 
 def initialize_chatbot():
     """Inicializa el chatbot"""
-    with st.spinner("🤖 Inicializando chatbot..."):
-        try:
+    try:
+        with st.spinner("🤖 Inicializando chatbot..."):
+            from rag_chatbot import RAGChatbot
             chatbot = RAGChatbot()
             if chatbot.setup_retrieval_chain():
                 st.session_state.chatbot = chatbot
@@ -101,11 +156,15 @@ def initialize_chatbot():
                 return True
             else:
                 return False
-        except Exception as e:
-            st.error(f"Error inicializando chatbot: {e}")
-            return False
+    except Exception as e:
+        st.error(f"Error inicializando chatbot: {e}")
+        return False
 
 def main():
+    # Verificar configuración primero
+    if not check_configuration():
+        return
+    
     # Header principal
     st.markdown('<h1 class="main-header">🤖 RAG Chatbot para Documentos PDF</h1>', unsafe_allow_html=True)
     st.markdown("---")
@@ -133,7 +192,7 @@ def main():
                 if success:
                     st.success(f"✅ {num_chunks} chunks procesados y almacenados")
                     time.sleep(1)
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("❌ Error procesando documentos")
         else:
@@ -147,7 +206,7 @@ def main():
                 if initialize_chatbot():
                     st.success("✅ Chatbot listo")
                     time.sleep(1)
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.error("❌ Error inicializando chatbot")
         elif st.session_state.system_ready:
@@ -165,7 +224,7 @@ def main():
         st.markdown("---")
         if st.button("🔄 Reiniciar Sistema"):
             st.session_state.clear()
-            st.experimental_rerun()
+            st.rerun()
         
         # Información adicional
         with st.expander("💡 Cómo usar"):
