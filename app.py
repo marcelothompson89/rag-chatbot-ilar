@@ -1,15 +1,18 @@
-# app.py - Interfaz Streamlit con verificación de configuración
+# app.py - Interfaz Streamlit simplificada (solo chat)
 import streamlit as st
 import os
 from config import Config
 import time
+import warnings
+
+warnings.filterwarnings("ignore", message="No secrets files found")
 
 # Configuración de la página
 st.set_page_config(
     page_title="🤖 RAG Chatbot - Documentos PDF",
     page_icon="📚",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"  # Sidebar colapsado por defecto
 )
 
 # CSS personalizado para mejor apariencia
@@ -42,13 +45,6 @@ st.markdown("""
         border-radius: 0.5rem;
         border: 1px solid #c3e6cb;
     }
-    .warning-box {
-        background-color: #fff3cd;
-        color: #856404;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        border: 1px solid #ffeaa7;
-    }
     .error-box {
         background-color: #f8d7da;
         color: #721c24;
@@ -61,104 +57,83 @@ st.markdown("""
 
 def check_configuration():
     """Verifica que la configuración esté correcta"""
-    config = Config()
-    errors = config.validate_keys()
-    
-    if errors:
-        st.markdown('<h1 class="main-header">⚙️ Configuración Requerida</h1>', unsafe_allow_html=True)
-        
-        st.markdown(f'<div class="error-box"><strong>❌ Configuración Incompleta</strong><br>{"<br>".join(errors)}</div>', unsafe_allow_html=True)
-        
-        st.markdown("""
-        ### 🔧 Para configurar las API Keys en Streamlit Cloud:
-        
-        1. **Ve a tu aplicación en Streamlit Cloud**
-        2. **Haz clic en "Manage app"** (esquina inferior derecha)
-        3. **Ve a la pestaña "Settings"**
-        4. **Selecciona "Secrets"**
-        5. **Agrega las siguientes variables:**
-        
-        ```toml
-        OPENAI_API_KEY = "tu-api-key-real-de-openai"
-        PINECONE_API_KEY = "tu-api-key-real-de-pinecone"
-        DOCUMENTS_FOLDER = "documentos"
-        ```
-        
-        6. **Guarda los cambios**
-        7. **La aplicación se reiniciará automáticamente**
-        
-        ### 📝 Notas importantes:
-        - No incluyas las comillas en las API keys
-        - Las API keys deben ser reales, no placeholders
-        - Después de guardar, espera unos segundos para que se reinicie
-        """)
-        
-        return False
-    
-    return True
-
-# Inicializar estados de sesión
-if "chatbot" not in st.session_state:
-    st.session_state.chatbot = None
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "system_ready" not in st.session_state:
-    st.session_state.system_ready = False
-if "documents_processed" not in st.session_state:
-    st.session_state.documents_processed = False
-
-def check_documents():
-    """Verifica si hay documentos en la carpeta"""
     try:
-        from document_processor import DocumentProcessor
-        processor = DocumentProcessor()
-        pdf_files = processor.get_pdf_files()
-        return len(pdf_files) > 0, len(pdf_files)
-    except Exception as e:
-        st.error(f"Error verificando documentos: {e}")
-        return False, 0
-
-def process_documents():
-    """Procesa y almacena documentos"""
-    try:
-        with st.spinner("🔄 Procesando documentos PDF..."):
-            # Procesar documentos
-            from document_processor import DocumentProcessor
-            processor = DocumentProcessor()
-            documents = processor.process_documents()
+        config = Config()
+        errors = config.validate_keys()
+        
+        if errors:
+            st.markdown('<h1 class="main-header">⚙️ Configuración Requerida</h1>', unsafe_allow_html=True)
+            st.markdown(f'<div class="error-box"><strong>❌ Configuración Incompleta</strong><br>{"<br>".join(errors)}</div>', unsafe_allow_html=True)
             
-            if documents:
-                # Almacenar en vector store
-                from vector_store import VectorStoreManager
-                vector_manager = VectorStoreManager()
-                success = vector_manager.store_documents(documents)
-                
-                if success:
-                    st.session_state.documents_processed = True
-                    return True, len(documents)
-                else:
-                    return False, 0
-            else:
-                return False, 0
+            st.markdown("""
+            ### 🔧 Configuración requerida:
+            
+            Para usar este chatbot, necesitas configurar las API keys en el archivo `.env`:
+            
+            ```
+            OPENAI_API_KEY=tu-api-key-de-openai
+            PINECONE_API_KEY=tu-api-key-de-pinecone
+            ```
+            
+            1. **OpenAI API Key** - para el modelo de chat
+            2. **Pinecone API Key** - para la base de datos vectorial
+            
+            Después de configurar, recarga la página.
+            """)
+            return False
+        
+        return True
+        
     except Exception as e:
-        st.error(f"Error procesando documentos: {e}")
+        st.error(f"Error verificando configuración: {e}")
+        st.markdown("""
+        ### 💡 Solución:
+        
+        Asegúrate de tener un archivo `.env` en la raíz del proyecto con:
+        
+        ```
+        OPENAI_API_KEY=tu-api-key-real
+        PINECONE_API_KEY=tu-api-key-real
+        DOCUMENTS_FOLDER=documentos
+        ```
+        """)
+        return False
+
+def check_system_ready():
+    """Verifica si el sistema está listo para usar"""
+    try:
+        from vector_store import VectorStoreManager
+        vector_manager = VectorStoreManager()
+        stats = vector_manager.get_index_stats()
+        
+        if stats.get('total_vectors', 0) > 0:
+            return True, stats.get('total_vectors', 0)
+        else:
+            return False, 0
+    except Exception as e:
         return False, 0
 
 def initialize_chatbot():
-    """Inicializa el chatbot"""
-    try:
-        with st.spinner("🤖 Inicializando chatbot..."):
+    """Inicializa el chatbot si no está inicializado"""
+    if "chatbot" not in st.session_state or st.session_state.chatbot is None:
+        try:
             from rag_chatbot import RAGChatbot
             chatbot = RAGChatbot()
             if chatbot.setup_retrieval_chain():
                 st.session_state.chatbot = chatbot
-                st.session_state.system_ready = True
                 return True
             else:
                 return False
-    except Exception as e:
-        st.error(f"Error inicializando chatbot: {e}")
-        return False
+        except Exception as e:
+            st.error(f"Error inicializando chatbot: {e}")
+            return False
+    return True
+
+# Inicializar estados de sesión
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "chatbot" not in st.session_state:
+    st.session_state.chatbot = None
 
 def main():
     # Verificar configuración primero
@@ -166,164 +141,104 @@ def main():
         return
     
     # Header principal
-    st.markdown('<h1 class="main-header">🤖 RAG Chatbot para Documentos PDF</h1>', unsafe_allow_html=True)
-    st.markdown("---")
+    st.markdown('<h1 class="main-header">🤖 Chatbot RAG - Documentos PDF</h1>', unsafe_allow_html=True)
     
-    # Sidebar para configuración y estado
+    # Verificar si el sistema está listo
+    system_ready, num_vectors = check_system_ready()
+    
+    if not system_ready:
+        st.markdown("""
+        <div class="error-box">
+            <strong>⚠️ Sistema no está listo</strong><br>
+            La base de conocimiento no está disponible. Contacta al administrador del sistema.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("""
+        ### 📝 Información del Sistema
+        
+        Este chatbot necesita que la base de conocimiento esté configurada previamente.
+        
+        **Estado actual:** Base de datos vectorial vacía o no disponible
+        
+        **Para administradores:** Ejecuta `python process_and_store.py` para procesar los documentos.
+        """)
+        return
+    
+    # Inicializar chatbot
+    if not initialize_chatbot():
+        st.error("❌ Error inicializando el chatbot")
+        return
+    
+    # Información del sistema en sidebar (opcional y minimalista)
     with st.sidebar:
-        st.header("⚙️ Panel de Control")
+        st.markdown("### 📊 Estado del Sistema")
+        st.markdown(f'<div class="success-box">✅ Sistema operativo<br>{num_vectors} documentos cargados</div>', unsafe_allow_html=True)
         
-        # 1. Verificar documentos
-        st.subheader("📁 Documentos")
-        has_docs, num_docs = check_documents()
-        
-        if has_docs:
-            st.markdown(f'<div class="success-box">✅ {num_docs} documentos PDF encontrados</div>', unsafe_allow_html=True)
-        else:
-            st.markdown(f'<div class="warning-box">⚠️ No hay documentos PDF en la carpeta "documentos"<br>Agrega algunos archivos PDF y recarga la página.</div>', unsafe_allow_html=True)
-            st.stop()
-        
-        # 2. Estado del procesamiento
-        st.subheader("🗄️ Base de Conocimiento")
-        
-        if not st.session_state.documents_processed:
-            if st.button("📥 Procesar Documentos", type="primary"):
-                success, num_chunks = process_documents()
-                if success:
-                    st.success(f"✅ {num_chunks} chunks procesados y almacenados")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Error procesando documentos")
-        else:
-            st.markdown('<div class="success-box">✅ Documentos procesados y almacenados</div>', unsafe_allow_html=True)
-        
-        # 3. Estado del chatbot
-        st.subheader("🤖 Chatbot")
-        
-        if not st.session_state.system_ready and st.session_state.documents_processed:
-            if st.button("🚀 Inicializar Chatbot", type="primary"):
-                if initialize_chatbot():
-                    st.success("✅ Chatbot listo")
-                    time.sleep(1)
-                    st.rerun()
-                else:
-                    st.error("❌ Error inicializando chatbot")
-        elif st.session_state.system_ready:
-            st.markdown('<div class="success-box">✅ Chatbot operativo</div>', unsafe_allow_html=True)
-            
-            # Estadísticas del sistema
-            if st.session_state.chatbot:
-                stats = st.session_state.chatbot.get_system_stats()
-                with st.expander("📊 Estadísticas del Sistema"):
-                    st.write(f"**Documentos:** {stats.get('total_documents', 'N/A')}")
-                    st.write(f"**Modelo:** {stats.get('model_used', 'N/A')}")
-                    st.write(f"**Estado:** {stats.get('status', 'N/A')}")
-        
-        # Botón de reinicio
-        st.markdown("---")
-        if st.button("🔄 Reiniciar Sistema"):
-            st.session_state.clear()
+        if st.button("🔄 Limpiar Chat"):
+            st.session_state.messages = []
             st.rerun()
-        
-        # Información adicional
-        with st.expander("💡 Cómo usar"):
-            st.markdown("""
-            **Pasos para usar el chatbot:**
-            
-            1. **Coloca tus PDFs** en la carpeta `documentos/`
-            2. **Procesa los documentos** (botón azul)
-            3. **Inicializa el chatbot** (botón azul)
-            4. **¡Empieza a chatear!** 
-            
-            **Ejemplos de preguntas:**
-            - "¿Qué información contienen estos documentos?"
-            - "Resume los puntos principales"
-            - "¿Hay información sobre [tema específico]?"
-            """)
     
     # Área principal de chat
-    if st.session_state.system_ready and st.session_state.chatbot:
-        st.header("💬 Chat con tus Documentos")
+    st.markdown("### 💬 Haz preguntas sobre los documentos")
+    
+    # Mostrar historial de mensajes
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+            
+            # Mostrar fuentes si es una respuesta del asistente
+            if message["role"] == "assistant" and "sources" in message and message["sources"]:
+                with st.expander(f"📄 Ver fuentes ({len(message['sources'])})"):
+                    for i, source in enumerate(message["sources"], 1):
+                        st.markdown(f"""
+                        <div class="source-box">
+                            <strong>{i}. 📄 {source['filename']}</strong> (fragmento {source['chunk_id']})<br>
+                            <em>{source['preview']}</em>
+                        </div>
+                        """, unsafe_allow_html=True)
+    
+    # Input para nueva pregunta
+    if prompt := st.chat_input("Escribe tu pregunta aquí..."):
+        # Agregar mensaje del usuario
+        st.session_state.messages.append({"role": "user", "content": prompt})
         
-        # Mostrar historial de mensajes
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-                
-                # Mostrar fuentes si es una respuesta del asistente
-                if message["role"] == "assistant" and "sources" in message and message["sources"]:
-                    with st.expander(f"📄 Ver fuentes ({len(message['sources'])})"):
-                        for i, source in enumerate(message["sources"], 1):
-                            st.markdown(f"""
-                            <div class="source-box">
-                                <strong>{i}. 📄 {source['filename']}</strong> (chunk {source['chunk_id']})<br>
-                                <em>{source['preview']}</em>
-                            </div>
-                            """, unsafe_allow_html=True)
+        with st.chat_message("user"):
+            st.markdown(prompt)
         
-        # Input para nueva pregunta
-        if prompt := st.chat_input("Haz una pregunta sobre tus documentos..."):
-            # Agregar mensaje del usuario
-            st.session_state.messages.append({"role": "user", "content": prompt})
+        # Generar respuesta
+        with st.chat_message("assistant"):
+            with st.spinner("🤔 Analizando documentos..."):
+                response = st.session_state.chatbot.chat(prompt)
             
-            with st.chat_message("user"):
-                st.markdown(prompt)
+            st.markdown(response["answer"])
             
-            # Generar respuesta
-            with st.chat_message("assistant"):
-                with st.spinner("🤔 Analizando documentos..."):
-                    response = st.session_state.chatbot.chat(prompt)
-                
-                st.markdown(response["answer"])
-                
-                # Mostrar fuentes
-                if response["sources"]:
-                    with st.expander(f"📄 Ver fuentes ({len(response['sources'])})"):
-                        for i, source in enumerate(response["sources"], 1):
-                            st.markdown(f"""
-                            <div class="source-box">
-                                <strong>{i}. 📄 {source['filename']}</strong> (chunk {source['chunk_id']})<br>
-                                <em>{source['preview']}</em>
-                            </div>
-                            """, unsafe_allow_html=True)
-            
-            # Agregar respuesta al historial
-            st.session_state.messages.append({
-                "role": "assistant", 
-                "content": response["answer"],
-                "sources": response["sources"]
-            })
+            # Mostrar fuentes
+            if response["sources"]:
+                with st.expander(f"📄 Ver fuentes ({len(response['sources'])})"):
+                    for i, source in enumerate(response["sources"], 1):
+                        st.markdown(f"""
+                        <div class="source-box">
+                            <strong>{i}. 📄 {source['filename']}</strong> (fragmento {source['chunk_id']})<br>
+                            <em>{source['preview']}</em>
+                        </div>
+                        """, unsafe_allow_html=True)
+        
+        # Agregar respuesta al historial
+        st.session_state.messages.append({
+            "role": "assistant", 
+            "content": response["answer"],
+            "sources": response["sources"]
+        })
     
-    elif st.session_state.documents_processed and not st.session_state.system_ready:
-        st.info("👆 Usa el panel lateral para inicializar el chatbot")
-    
-    elif has_docs and not st.session_state.documents_processed:
-        st.info("👆 Usa el panel lateral para procesar los documentos")
-    
-    else:
+    # Mensaje de ayuda al final
+    if len(st.session_state.messages) == 0:
         st.markdown("""
-        ## 🚀 ¡Bienvenido al RAG Chatbot!
-        
-        Este sistema te permite chatear con tus documentos PDF usando inteligencia artificial.
-        
-        ### 📋 Para empezar:
-        1. **Agrega documentos PDF** a la carpeta `documentos/` de tu proyecto
-        2. **Usa el panel lateral** para procesar los documentos
-        3. **Inicializa el chatbot** cuando esté listo
-        4. **¡Empieza a hacer preguntas!**
-        
-        ### 💡 Ejemplos de preguntas que puedes hacer:
+        ### 💡 Ejemplos de preguntas:
         - "¿Cuáles son los puntos principales de estos documentos?"
         - "Resume la información sobre [tema específico]"
         - "¿Qué documentos hablan de [concepto]?"
-        - "Explícame [término o proceso] mencionado en los documentos"
-        
-        ### ✨ Características:
-        - 🎯 **Respuestas precisas** basadas en tus documentos
-        - 📚 **Referencias a fuentes** en cada respuesta
-        - 🔍 **Búsqueda semántica** avanzada
-        - 💬 **Chat conversacional** natural
+        - "Explícame [término] mencionado en los documentos"
         """)
 
 if __name__ == "__main__":
