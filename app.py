@@ -1,18 +1,20 @@
-# app.py - Interfaz Streamlit simplificada (solo chat)
+# app.py - Interfaz Streamlit con enlaces a PDFs optimizado
 import streamlit as st
 import os
 from config import Config
 import time
 import warnings
+import base64
+from pathlib import Path
 
 warnings.filterwarnings("ignore", message="No secrets files found")
 
 # Configuración de la página
 st.set_page_config(
-    page_title="🤖 RAG Chatbot - Documentos PDF",
+    page_title="🤖 ILAR Chatbot",
     page_icon="📚",
     layout="wide",
-    initial_sidebar_state="collapsed"  # Sidebar colapsado por defecto
+    initial_sidebar_state="collapsed"
 )
 
 # CSS personalizado para mejor apariencia
@@ -38,6 +40,20 @@ st.markdown("""
         margin: 0.2rem 0;
         border-left: 3px solid #1f77b4;
     }
+    .pdf-info {
+        display: inline-block;
+        margin-top: 0.5rem;
+        padding: 0.3rem 0.8rem;
+        background-color: #f8f9fa;
+        color: #495057;
+        border-radius: 0.3rem;
+        font-size: 0.8rem;
+        border: 1px solid #dee2e6;
+    }
+    .pdf-download-btn {
+        margin-left: 0.5rem;
+        font-size: 0.8rem;
+    }
     .success-box {
         background-color: #d4edda;
         color: #155724;
@@ -52,8 +68,56 @@ st.markdown("""
         border-radius: 0.5rem;
         border: 1px solid #f5c6cb;
     }
+    .file-info {
+        font-size: 0.7rem;
+        color: #6c757d;
+        margin-top: 0.2rem;
+    }
 </style>
 """, unsafe_allow_html=True)
+
+def get_file_size(file_path):
+    """Obtiene el tamaño del archivo en formato legible"""
+    try:
+        size_bytes = os.path.getsize(file_path)
+        if size_bytes < 1024:
+            return f"{size_bytes} B"
+        elif size_bytes < 1024**2:
+            return f"{size_bytes/1024:.1f} KB"
+        else:
+            return f"{size_bytes/(1024**2):.1f} MB"
+    except:
+        return "Tamaño desconocido"
+
+def create_pdf_button_for_source(file_path, filename, unique_key):
+    """Crea un botón de descarga para el PDF en las fuentes"""
+    try:
+        file_size = get_file_size(file_path)
+        size_bytes = os.path.getsize(file_path)
+        
+        # Crear un contenedor único para el botón
+        button_container = st.container()
+        
+        with button_container:
+            # Leer el archivo PDF
+            with open(file_path, "rb") as f:
+                pdf_data = f.read()
+            
+            # Crear botón de descarga
+            download_button = st.download_button(
+                label=f"📄 Abrir {filename} ({file_size})",
+                data=pdf_data,
+                file_name=filename,
+                mime="application/pdf",
+                key=f"pdf_source_{unique_key}_{filename}",
+                help=f"Haz clic para descargar/abrir {filename}"
+            )
+            
+            return True
+            
+    except Exception as e:
+        st.markdown(f'<span style="color: #6c757d; font-size: 0.8rem;">📄 {filename} - ❌ No disponible</span>', unsafe_allow_html=True)
+        return False
 
 def check_configuration():
     """Verifica que la configuración esté correcta"""
@@ -129,11 +193,49 @@ def initialize_chatbot():
             return False
     return True
 
+def get_available_pdfs():
+    """Obtiene la lista de PDFs disponibles con sus rutas"""
+    try:
+        config = Config()
+        documents_folder = config.DOCUMENTS_FOLDER
+        
+        if not os.path.exists(documents_folder):
+            return {}
+        
+        pdf_files = {}
+        for filename in os.listdir(documents_folder):
+            if filename.lower().endswith('.pdf'):
+                pdf_path = os.path.join(documents_folder, filename)
+                pdf_files[filename] = pdf_path
+        
+        return pdf_files
+    except Exception as e:
+        st.error(f"Error obteniendo PDFs: {e}")
+        return {}
+
 # Inicializar estados de sesión
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "chatbot" not in st.session_state:
     st.session_state.chatbot = None
+
+def display_source_with_file_info(source, available_pdfs, message_index, source_index):
+    """Muestra una fuente con botón de descarga del PDF"""
+    filename = source['filename']
+    
+    # Mostrar información básica de la fuente
+    st.markdown(f"""
+    **📄 {filename}** (fragmento {source['chunk_id']})
+    
+    *{source['preview']}*
+    """)
+    
+    # Agregar botón de descarga si el archivo está disponible
+    if filename in available_pdfs:
+        unique_key = f"{message_index}_{source_index}"
+        create_pdf_button_for_source(available_pdfs[filename], filename, unique_key)
+    else:
+        st.markdown(f'<span style="color: #6c757d; font-size: 0.8rem;">📄 {filename} - ❌ Archivo no encontrado</span>', unsafe_allow_html=True)
 
 def main():
     # Verificar configuración primero
@@ -141,7 +243,7 @@ def main():
         return
     
     # Header principal
-    st.markdown('<h1 class="main-header">🤖 Chatbot RAG - Documentos PDF</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">🤖 Chatbot ILAR </h1>', unsafe_allow_html=True)
     
     # Verificar si el sistema está listo
     system_ready, num_vectors = check_system_ready()
@@ -170,10 +272,20 @@ def main():
         st.error("❌ Error inicializando el chatbot")
         return
     
-    # Información del sistema en sidebar (opcional y minimalista)
+    # Obtener PDFs disponibles
+    available_pdfs = get_available_pdfs()
+    
+    # Información del sistema en sidebar
     with st.sidebar:
         st.markdown("### 📊 Estado del Sistema")
         st.markdown(f'<div class="success-box">✅ Sistema operativo<br>{num_vectors} documentos cargados</div>', unsafe_allow_html=True)
+        
+        # Mostrar solo información básica de los PDFs disponibles
+        if available_pdfs:
+            st.markdown("### 📚 Documentos Disponibles")
+            for filename, filepath in available_pdfs.items():
+                file_size = get_file_size(filepath)
+                st.markdown(f"📄 **{filename}** ({file_size})")
         
         if st.button("🔄 Limpiar Chat"):
             st.session_state.messages = []
@@ -183,20 +295,17 @@ def main():
     st.markdown("### 💬 Haz preguntas sobre los documentos")
     
     # Mostrar historial de mensajes
-    for message in st.session_state.messages:
+    for message_index, message in enumerate(st.session_state.messages):
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             
             # Mostrar fuentes si es una respuesta del asistente
             if message["role"] == "assistant" and "sources" in message and message["sources"]:
                 with st.expander(f"📄 Ver fuentes ({len(message['sources'])})"):
-                    for i, source in enumerate(message["sources"], 1):
-                        st.markdown(f"""
-                        <div class="source-box">
-                            <strong>{i}. 📄 {source['filename']}</strong> (fragmento {source['chunk_id']})<br>
-                            <em>{source['preview']}</em>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    for source_index, source in enumerate(message["sources"]):
+                        st.markdown(f"**{source_index + 1}.**")
+                        display_source_with_file_info(source, available_pdfs, message_index, source_index)
+                        st.markdown("---")
     
     # Input para nueva pregunta
     if prompt := st.chat_input("Escribe tu pregunta aquí..."):
@@ -213,16 +322,15 @@ def main():
             
             st.markdown(response["answer"])
             
-            # Mostrar fuentes
+            # Mostrar fuentes con botones de descarga
             if response["sources"]:
                 with st.expander(f"📄 Ver fuentes ({len(response['sources'])})"):
-                    for i, source in enumerate(response["sources"], 1):
-                        st.markdown(f"""
-                        <div class="source-box">
-                            <strong>{i}. 📄 {source['filename']}</strong> (fragmento {source['chunk_id']})<br>
-                            <em>{source['preview']}</em>
-                        </div>
-                        """, unsafe_allow_html=True)
+                    for source_index, source in enumerate(response["sources"]):
+                        st.markdown(f"**{source_index + 1}.**")
+                        # Crear key único para el mensaje actual
+                        current_message_index = len(st.session_state.messages)
+                        display_source_with_file_info(source, available_pdfs, current_message_index, source_index)
+                        st.markdown("---")
         
         # Agregar respuesta al historial
         st.session_state.messages.append({
@@ -239,6 +347,7 @@ def main():
         - "Resume la información sobre [tema específico]"
         - "¿Qué documentos hablan de [concepto]?"
         - "Explícame [término] mencionado en los documentos"
+        
         """)
 
 if __name__ == "__main__":

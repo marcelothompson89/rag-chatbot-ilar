@@ -31,9 +31,8 @@ INSTRUCCIONES IMPORTANTES:
 1. Responde ÚNICAMENTE basándote en la información del contexto proporcionado
 2. Si la información no está en el contexto, indica claramente: "No encuentro esa información en los documentos proporcionados"
 3. Sé preciso, claro y conciso
-4. Si mencionas información específica, indica de qué documento proviene
-5. Responde siempre en español
-6. Si hay múltiples respuestas posibles, menciona todas las relevantes
+4. Responde siempre en español
+5. Si hay múltiples respuestas posibles, menciona todas las relevantes
 
 RESPUESTA:"""
         )
